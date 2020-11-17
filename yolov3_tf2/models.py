@@ -3,6 +3,7 @@ from absl.flags import FLAGS
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Model
+from tensorflow.keras import layers
 from tensorflow.keras.layers import (
     Add,
     Concatenate,
@@ -192,10 +193,10 @@ def yolo_nms(outputs, anchors, masks, classes):
         boxes=tf.reshape(bbox, (tf.shape(bbox)[0], -1, 1, 4)),
         scores=tf.reshape(
             scores, (tf.shape(scores)[0], -1, tf.shape(scores)[-1])),
-        max_output_size_per_class=FLAGS.yolo_max_boxes,
-        max_total_size=FLAGS.yolo_max_boxes,
-        iou_threshold=FLAGS.yolo_iou_threshold,
-        score_threshold=FLAGS.yolo_score_threshold
+        max_output_size_per_class=100,
+        max_total_size=100,
+        iou_threshold=0.5,
+        score_threshold=0.5
     )
 
     return boxes, scores, classes, valid_detections
@@ -203,34 +204,74 @@ def yolo_nms(outputs, anchors, masks, classes):
 
 def YoloV3(size=None, channels=3, anchors=yolo_anchors,
            masks=yolo_anchor_masks, classes=80, training=False):
-    x = inputs = Input([size, size, channels], name='input')
+    def yolo_net(x_in):
+        x = inputs = Input([size, size, channels], name='input')
 
-    x_36, x_61, x = Darknet(name='yolo_darknet')(x)
+        x_36, x_61, x = Darknet(name='yolo_darknet')(x)
+        x_36 = layers.Cropping2D(((1, 0), (1, 0)))(x_36)
 
-    x = YoloConv(512, name='yolo_conv_0')(x)
-    output_0 = YoloOutput(512, len(masks[0]), classes, name='yolo_output_0')(x)
+        x = YoloConv(512, name='yolo_conv_0')(x)
+        output_0 = YoloOutput(512, len(masks[0]), classes, name='yolo_output_0')(x)
 
-    x = YoloConv(256, name='yolo_conv_1')((x, x_61))
-    output_1 = YoloOutput(256, len(masks[1]), classes, name='yolo_output_1')(x)
+        x = YoloConv(256, name='yolo_conv_1')((x, x_61))
+        output_1 = YoloOutput(256, len(masks[1]), classes, name='yolo_output_1')(x)
 
-    x = YoloConv(128, name='yolo_conv_2')((x, x_36))
-    output_2 = YoloOutput(128, len(masks[2]), classes, name='yolo_output_2')(x)
+        x = YoloConv(128, name='yolo_conv_2')((x, x_36))
+        output_2 = YoloOutput(128, len(masks[2]), classes, name='yolo_output_2')(x)
 
-    if training:
-        return Model(inputs, (output_0, output_1, output_2), name='yolov3')
+        if training:
+            return Model(inputs, (output_0, output_1, output_2), name='yolov3')
 
-    boxes_0 = Lambda(lambda x: yolo_boxes(x, anchors[masks[0]], classes),
-                     name='yolo_boxes_0')(output_0)
-    boxes_1 = Lambda(lambda x: yolo_boxes(x, anchors[masks[1]], classes),
-                     name='yolo_boxes_1')(output_1)
-    boxes_2 = Lambda(lambda x: yolo_boxes(x, anchors[masks[2]], classes),
-                     name='yolo_boxes_2')(output_2)
+        boxes_0 = Lambda(lambda x: yolo_boxes(x, anchors[masks[0]], classes),
+                         name='yolo_boxes_0')(output_0)
+        boxes_1 = Lambda(lambda x: yolo_boxes(x, anchors[masks[1]], classes),
+                         name='yolo_boxes_1')(output_1)
+        boxes_2 = Lambda(lambda x: yolo_boxes(x, anchors[masks[2]], classes),
+                         name='yolo_boxes_2')(output_2)
 
-    outputs = Lambda(lambda x: yolo_nms(x, anchors, masks, classes),
-                     name='yolo_nms')((boxes_0[:3], boxes_1[:3], boxes_2[:3]))
+        outputs = Lambda(lambda x: yolo_nms(x, anchors, masks, classes),
+                         name='yolo_nms')((boxes_0[:3], boxes_1[:3], boxes_2[:3]))
 
-    return Model(inputs, outputs, name='yolov3')
+        return Model(inputs, outputs, name='yolov3')(x_in)
+    return yolo_net
 
+def TreeNet(training=False):
+        chm_input = Input(shape=(200, 200, 1), name="chm")
+        rgb_input = Input(shape=(200, 200, 3), name="rgb")
+        hsi_input = Input(shape=(200, 200, 3), name="hsi")
+        las_input = Input(shape=(40, 40, 70, 1), name="las")
+
+        # Image network
+        image_net = layers.Concatenate(axis=3)([hsi_input, chm_input, rgb_input])
+        image_net = layers.Conv2D(7, 5, activation="relu", name="img_1")(image_net)
+        image_net = layers.Conv2D(8, 5, activation="relu", name="img_2")(image_net)
+        image_net = layers.Conv2D(8, 5, activation="relu", name="img_3")(image_net)
+        image_net = layers.Conv2D(8, 5, activation="relu", name="img_4")(image_net)
+        image_net = layers.Conv2D(16, 5, activation="relu", name="img_5")(image_net)
+        image_net = layers.Conv2D(16, 5, activation="relu", name="img_6")(image_net)
+        image_net = layers.Conv2D(16, 5, activation="relu", name="img_7")(image_net)
+        image_net = layers.Conv2D(16, 5, activation="relu", name="img_8")(image_net)
+
+        # Las 3D network
+        las_net = layers.Conv3D(2, 3, activation="relu", name="las_1")(las_input)
+        las_net = layers.Conv3D(2, 3, strides=(1, 1, 2), activation="relu", name="las_2")(las_net)
+        las_net = layers.Conv3D(4, 3, activation="relu", name="las_3")(las_net)
+        las_net = layers.Conv3D(4, 3, strides=(1, 1, 2), activation="relu", name="las_4")(las_net)
+        las_net = layers.Conv3D(8, 3, activation="relu", name="las_5")(las_net)
+        las_net = layers.Conv3D(8, 3, strides=(1, 1, 2), activation="relu", name="las_6")(las_net)
+        las_net = layers.Conv3D(16, 3, activation="relu", name="las_7")(las_net)
+        las_net = layers.Conv3D(16, (3, 3, 4), activation="relu", name="las_8")(las_net)
+        las_net = layers.Reshape((24, 24, 16), input_shape=(24, 24, 1, 16))(las_net) 
+        las_up = layers.UpSampling2D(size=7)(las_net)
+        features = layers.Concatenate(axis=3)([las_up, image_net])
+        features = layers.Conv2D(3, 1, activation="relu")(features)
+
+        outputs = YoloV3(size=168, classes=3, training=training)(features)
+
+        return Model(
+                    inputs=[rgb_input, chm_input, hsi_input, las_input],
+                    outputs=outputs,
+                )
 
 def YoloV3Tiny(size=None, channels=3, anchors=yolo_tiny_anchors,
                masks=yolo_tiny_anchor_masks, classes=80, training=False):
