@@ -193,8 +193,8 @@ def yolo_nms(outputs, anchors, masks, classes):
         boxes=tf.reshape(bbox, (tf.shape(bbox)[0], -1, 1, 4)),
         scores=tf.reshape(
             scores, (tf.shape(scores)[0], -1, tf.shape(scores)[-1])),
-        max_output_size_per_class=100,
-        max_total_size=100,
+        max_output_size_per_class=FLAGS.yolo_max_boxes,
+        max_total_size=FLAGS.yolo_max_boxes,
         iou_threshold=0.5,
         score_threshold=0.5
     )
@@ -208,7 +208,6 @@ def YoloV3(size=None, channels=3, anchors=yolo_anchors,
         x = inputs = Input([size, size, channels], name='input')
 
         x_36, x_61, x = Darknet(name='yolo_darknet')(x)
-        x_36 = layers.Cropping2D(((1, 0), (1, 0)))(x_36)
 
         x = YoloConv(512, name='yolo_conv_0')(x)
         output_0 = YoloOutput(512, len(masks[0]), classes, name='yolo_output_0')(x)
@@ -220,7 +219,7 @@ def YoloV3(size=None, channels=3, anchors=yolo_anchors,
         output_2 = YoloOutput(128, len(masks[2]), classes, name='yolo_output_2')(x)
 
         if training:
-            return Model(inputs, (output_0, output_1, output_2), name='yolov3')
+            return Model(inputs, (output_0, output_1, output_2), name='yolov3')(x_in)
 
         boxes_0 = Lambda(lambda x: yolo_boxes(x, anchors[masks[0]], classes),
                          name='yolo_boxes_0')(output_0)
@@ -265,8 +264,9 @@ def TreeNet(training=False):
         las_up = layers.UpSampling2D(size=7)(las_net)
         features = layers.Concatenate(axis=3)([las_up, image_net])
         features = layers.Conv2D(3, 1, activation="relu")(features)
+        features = tf.image.resize(features, (416, 416))
 
-        outputs = YoloV3(size=168, classes=3, training=training)(features)
+        outputs = YoloV3(size=416, classes=2, training=training)(features)
 
         return Model(
                     inputs=[rgb_input, chm_input, hsi_input, las_input],

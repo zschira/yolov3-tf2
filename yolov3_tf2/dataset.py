@@ -98,6 +98,15 @@ IMAGE_FEATURE_MAP = {
 }
 
 
+TREE_FEATURE_MAP = {
+    'chm': tf.io.FixedLenFeature([], tf.string),
+    'rgb': tf.io.FixedLenFeature([], tf.string),
+    'hsi': tf.io.FixedLenFeature([], tf.string),
+    'las': tf.io.FixedLenFeature([], tf.string),
+    'labels': tf.io.FixedLenFeature([], tf.string),
+}
+
+
 def parse_tfrecord(tfrecord, class_table, size):
     x = tf.io.parse_single_example(tfrecord, IMAGE_FEATURE_MAP)
     x_train = tf.image.decode_jpeg(x['image/encoded'], channels=3)
@@ -118,6 +127,22 @@ def parse_tfrecord(tfrecord, class_table, size):
     return x_train, y_train
 
 
+def parse_tree_tfrecord(tfrecord):
+    x = tf.io.parse_single_example(tfrecord, TREE_FEATURE_MAP)
+    chm = tf.reshape(tf.io.decode_raw(x['chm'], float), [20, 20, 1])
+    chm = tf.image.resize(chm, (200, 200))
+    rgb = tf.reshape(tf.io.decode_raw(x['rgb'], float), [200, 200, 3])
+    hsi = tf.reshape(tf.io.decode_raw(x['hsi'], float), [20, 20, 3])
+    hsi = tf.image.resize(hsi, (200, 200))
+    las = tf.reshape(tf.io.decode_raw(x['las'], float), [40, 40, 70, 1])
+
+    y_train = tf.reshape(tf.io.decode_raw(x['labels'], float), [30, 5])
+    paddings = [[0, FLAGS.yolo_max_boxes - tf.shape(y_train)[0]], [0, 0]]
+    y_train = tf.pad(y_train, paddings)
+
+    return (rgb, chm, hsi, las), y_train
+
+
 def load_tfrecord_dataset(file_pattern, class_file, size=416):
     LINE_NUMBER = -1  # TODO: use tf.lookup.TextFileIndex.LINE_NUMBER
     class_table = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
@@ -126,6 +151,12 @@ def load_tfrecord_dataset(file_pattern, class_file, size=416):
     files = tf.data.Dataset.list_files(file_pattern)
     dataset = files.flat_map(tf.data.TFRecordDataset)
     return dataset.map(lambda x: parse_tfrecord(x, class_table, size))
+
+
+def load_tree_tfrecord_dataset(file_pattern):
+    files = tf.data.Dataset.list_files(file_pattern)
+    dataset = files.flat_map(tf.data.TFRecordDataset)
+    return dataset.map(lambda x: parse_tree_tfrecord(x))
 
 
 def load_fake_dataset():
