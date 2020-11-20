@@ -1,5 +1,4 @@
 import tensorflow as tf
-from absl.flags import FLAGS
 
 @tf.function
 def transform_targets_for_output(y_true, grid_size, anchor_idxs):
@@ -121,7 +120,7 @@ def parse_tfrecord(tfrecord, class_table, size):
                         tf.sparse.to_dense(x['image/object/bbox/ymax']),
                         labels], axis=1)
 
-    paddings = [[0, FLAGS.yolo_max_boxes - tf.shape(y_train)[0]], [0, 0]]
+    paddings = [[0, 100 - tf.shape(y_train)[0]], [0, 0]]
     y_train = tf.pad(y_train, paddings)
 
     return x_train, y_train
@@ -137,7 +136,7 @@ def parse_tree_tfrecord(tfrecord):
     las = tf.reshape(tf.io.decode_raw(x['las'], float), [40, 40, 70, 1])
 
     y_train = tf.reshape(tf.io.decode_raw(x['labels'], float), [30, 5])
-    paddings = [[0, FLAGS.yolo_max_boxes - tf.shape(y_train)[0]], [0, 0]]
+    paddings = [[0, 100 - tf.shape(y_train)[0]], [0, 0]]
     y_train = tf.pad(y_train, paddings)
 
     return (rgb, chm, hsi, las), y_train
